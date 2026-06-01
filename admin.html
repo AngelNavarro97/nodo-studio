@@ -76,6 +76,7 @@
   /* ---------- HEADER ---------- */
   header{
     position:sticky;top:0;z-index:50;
+    padding-top:env(safe-area-inset-top);
     background:linear-gradient(180deg, rgba(250,250,248,.85) 0%, rgba(250,250,248,.72) 100%);
     backdrop-filter:saturate(180%) blur(20px);
     -webkit-backdrop-filter:saturate(180%) blur(20px);
@@ -613,15 +614,31 @@
   .toggle .lbl{font-size:14px;font-weight:500;color:var(--ink-2)}
 
   /* avatar uploader (in patient drawer) */
-  .avatar-uploader{display:flex;align-items:center;gap:20px;margin-top:6px}
+  .avatar-uploader{display:flex;align-items:flex-start;gap:20px;margin-top:6px;flex-wrap:wrap}
   .avatar-preview{
-    width:84px;height:84px;border-radius:50%;
+    width:120px;height:120px;border-radius:50%;
     background:linear-gradient(160deg, #f0f0eb 0%, #d9d9d4 100%);
     border:var(--hair) solid var(--line-strong);
-    display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:600;color:var(--ink);
-    flex:0 0 auto;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:600;color:var(--ink);
+    flex:0 0 auto;overflow:hidden;position:relative;
   }
-  .avatar-preview img{width:100%;height:100%;object-fit:cover}
+  .avatar-preview img{width:100%;height:100%;object-fit:cover;transition:transform .15s ease;transform-origin:center center;display:block}
+  .avatar-zoom-wrap{display:none;margin-top:14px;width:100%}
+  .avatar-zoom-wrap.on{display:block}
+  .avatar-zoom-wrap .zoom-label{
+    font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);
+    display:flex;justify-content:space-between;margin-bottom:6px;
+  }
+  .avatar-zoom-wrap input[type=range]{
+    width:100%;-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:var(--line-strong);outline:none;
+  }
+  .avatar-zoom-wrap input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;appearance:none;width:20px;height:20px;border-radius:50%;
+    background:var(--ink);cursor:pointer;border:2px solid var(--paper);box-shadow:var(--shadow-sm);
+  }
+  .avatar-zoom-wrap input[type=range]::-moz-range-thumb{
+    width:20px;height:20px;border-radius:50%;background:var(--ink);cursor:pointer;border:2px solid var(--paper);
+  }
   .avatar-actions{display:flex;flex-direction:column;gap:10px;min-width:0}
   .avatar-actions .lbl{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
   .avatar-actions .btns{display:flex;gap:8px;flex-wrap:wrap}
@@ -1052,8 +1069,10 @@
     .bottom-tabs button{padding:7px 2px;border-radius:16px;font-size:10px}
     .bottom-tabs button svg{width:22px;height:22px}
 
-    main{padding-bottom:calc(140px + env(safe-area-inset-bottom))}
-    .toast{bottom:calc(110px + env(safe-area-inset-bottom) + 14px);left:50%;transform:translate(-50%,40px);max-width:calc(100vw - 32px)}
+    main{padding-bottom:calc(180px + env(safe-area-inset-bottom))}
+    .toast{bottom:calc(130px + env(safe-area-inset-bottom) + 14px);left:50%;transform:translate(-50%,40px);max-width:calc(100vw - 32px)}
+    /* La cabecera ya respeta env(safe-area-inset-top) globalmente — refuerzo el contenido sticky para que el Dynamic Island no tape los botones */
+    .nav{min-height:60px}
     .toast.on{transform:translate(-50%,0)}
   }
 
@@ -1595,7 +1614,7 @@
       <div class="avatar-uploader">
         <div class="avatar-preview" id="avatar-preview">—</div>
         <div class="avatar-actions">
-          <span class="lbl">JPG o PNG · cuadrada</span>
+          <span class="lbl">JPG o PNG · ajusta el zoom para enmarcar</span>
           <div class="btns">
             <label class="upload" for="avatar-input">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
@@ -1606,6 +1625,10 @@
               Quitar
             </button>
           </div>
+        </div>
+        <div class="avatar-zoom-wrap" id="avatar-zoom-wrap">
+          <div class="zoom-label"><span>Zoom</span><span id="avatar-zoom-val">100%</span></div>
+          <input type="range" id="avatar-zoom" min="100" max="300" value="100" step="5" />
         </div>
         <input type="file" id="avatar-input" accept="image/*" style="display:none" />
       </div>
@@ -2596,8 +2619,40 @@ $('#confirm-yes-appt').addEventListener('click', async () => {
 ============================================================ */
 let editingPatientId = null;
 let bonoOn = false;
-let currentAvatar = null;   // URL en storage (string) o data URL temporal
-let currentAvatarFile = null; // File pendiente de subir si hay nuevo
+let currentAvatar = null;       // URL en storage (string) o data URL temporal
+let currentAvatarFile = null;   // File pendiente de subir si hay nuevo
+let avatarZoom = 100;           // % zoom para el recorte del avatar (100 = sin zoom)
+
+/* Recorta una data URL a cuadrado de 400×400 aplicando el zoom indicado */
+function bakeAvatarBlob(dataUrl, zoomPct){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const SIZE = 400;
+        const scale = (zoomPct || 100) / 100;
+        // Lado del crop sobre la imagen original
+        const baseSide = Math.min(img.width, img.height);
+        const cropSide = baseSide / scale;
+        const cropX = (img.width - cropSide) / 2;
+        const cropY = (img.height - cropSide) / 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = SIZE; canvas.height = SIZE;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, cropX, cropY, cropSide, cropSide, 0, 0, SIZE, SIZE);
+        canvas.toBlob(blob => {
+          if (!blob) return reject(new Error('No se pudo procesar la imagen'));
+          resolve(new File([blob], 'avatar.jpg', { type:'image/jpeg' }));
+        }, 'image/jpeg', 0.88);
+      } catch(e){ reject(e); }
+    };
+    img.onerror = () => reject(new Error('No se pudo cargar la imagen'));
+    img.src = dataUrl;
+  });
+}
 
 function setBono(on){
   bonoOn = on;
@@ -2608,18 +2663,29 @@ $('#bono-toggle').addEventListener('click', () => setBono(!bonoOn));
 
 function updateAvatarPreview(){
   const preview = $('#avatar-preview');
+  const zoomWrap = $('#avatar-zoom-wrap');
   if (currentAvatar){
-    preview.innerHTML = `<img src="${currentAvatar}" alt=""/>`;
+    preview.innerHTML = `<img src="${currentAvatar}" alt="" style="transform:scale(${avatarZoom/100})"/>`;
+    // Solo mostrar slider si hay un archivo nuevo (no si es una URL ya guardada)
+    if (currentAvatarFile){
+      zoomWrap.classList.add('on');
+      $('#avatar-zoom').value = avatarZoom;
+      $('#avatar-zoom-val').textContent = avatarZoom + '%';
+    } else {
+      zoomWrap.classList.remove('on');
+    }
   } else {
     const f = $('#pf-fname').value.trim();
     const l = $('#pf-lname').value.trim();
     preview.textContent = (f || l) ? initials(f||'?', l||'?') : '—';
+    zoomWrap.classList.remove('on');
   }
 }
 $('#avatar-input').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
   currentAvatarFile = file;
+  avatarZoom = 100;
   const reader = new FileReader();
   reader.onload = (ev) => { currentAvatar = ev.target.result; updateAvatarPreview(); };
   reader.readAsDataURL(file);
@@ -2627,8 +2693,15 @@ $('#avatar-input').addEventListener('change', (e) => {
 $('#avatar-remove').addEventListener('click', () => {
   currentAvatar = null;
   currentAvatarFile = null;
+  avatarZoom = 100;
   $('#avatar-input').value = '';
   updateAvatarPreview();
+});
+$('#avatar-zoom').addEventListener('input', (e) => {
+  avatarZoom = parseInt(e.target.value, 10) || 100;
+  $('#avatar-zoom-val').textContent = avatarZoom + '%';
+  const img = $('#avatar-preview img');
+  if (img) img.style.transform = `scale(${avatarZoom/100})`;
 });
 $('#pf-fname').addEventListener('input', updateAvatarPreview);
 $('#pf-lname').addEventListener('input', updateAvatarPreview);
@@ -2686,11 +2759,25 @@ $('#patient-form').addEventListener('submit', async (e) => {
   };
   if (!data.fname || !data.lname || !data.age || !data.phone || !data.diagnosis){ toast('Faltan campos obligatorios'); return; }
 
+  const submitBtn = $('#patient-form').querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
   try {
-    // Si hay una foto de perfil nueva, subirla primero a Supabase Storage
+    // Si hay una foto de perfil nueva, hornearla con el zoom y subirla
     if (currentAvatarFile){
       toast('Subiendo foto de perfil…');
-      data.avatar = await uploadToStorage(currentAvatarFile, 'avatars');
+      let bakedFile;
+      try {
+        bakedFile = await bakeAvatarBlob(currentAvatar, avatarZoom);
+      } catch(bakeErr){
+        console.error('Error horneando avatar:', bakeErr);
+        throw new Error('No se pudo procesar la foto. Prueba con otra.');
+      }
+      try {
+        data.avatar = await uploadToStorage(bakedFile, 'avatars');
+      } catch(upErr){
+        console.error('Error subiendo avatar:', upErr);
+        throw new Error('No se pudo subir la foto al servidor: ' + (upErr.message || 'permisos del bucket'));
+      }
       currentAvatarFile = null;
     }
 
@@ -2712,7 +2799,10 @@ $('#patient-form').addEventListener('submit', async (e) => {
     }
     refreshAll();
   } catch(err){
+    console.error(err);
     toast('Error al guardar: ' + (err.message || 'desconocido'));
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
   }
 });
 
