@@ -13,6 +13,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Mona+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
+<!-- Supabase JS SDK (database + auth + storage) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <style>
   :root{
     --ink:#0a0a0a;
@@ -1270,8 +1273,8 @@
     </form>
 
     <div class="auth-hint">
-      <span class="demo-label">Credenciales demo</span>
-      <strong>isa@nstd.es</strong> &nbsp;·&nbsp; <strong>nstd2026</strong>
+      <span class="demo-label">Acceso restringido al personal</span>
+      Usa el email y contraseña configurados en Supabase
     </div>
   </div>
 </div>
@@ -1303,7 +1306,7 @@
       <div class="user-menu" id="user-menu">
         <div class="menu-info">
           <div class="nm">Isa Celdrán</div>
-          <span class="em">isa@nstd.es</span>
+          <span class="em" id="user-email">—</span>
         </div>
         <button id="btn-logout" class="danger">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
@@ -1767,7 +1770,7 @@
 /* ============================================================
    CONSTANTS
 ============================================================ */
-const TODAY = new Date(2026, 4, 27);
+const TODAY = (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
 const MESES_LARGO = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const MESES_CAP = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const DIAS_LARGO = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
@@ -1777,121 +1780,120 @@ const SERVICE_DUR = { fisio:50, osteo:60, trauma:45, nutri:45 };
 const SERVICE_SHORT = { fisio:'Fisio', osteo:'Osteo', trauma:'Trauma', nutri:'Nutri' };
 
 /* ============================================================
-   SAMPLE PHOTOS (small inline SVG placeholders)
+   SUPABASE — cliente, mapeo de datos y carga
 ============================================================ */
-function svgPhoto(label, accent){
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 400'>
-    <defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
-      <stop offset='0' stop-color='#f0f0eb'/><stop offset='1' stop-color='#d9d9d4'/>
-    </linearGradient></defs>
-    <rect width='400' height='400' fill='url(%23g)'/>
-    <ellipse cx='200' cy='110' rx='42' ry='46' fill='#a8a8a3'/>
-    <path d='M150 160 Q200 145 250 160 L268 320 Q200 340 132 320 Z' fill='#a8a8a3'/>
-    <path d='M150 200 L132 290' stroke='#a8a8a3' stroke-width='28' stroke-linecap='round' fill='none'/>
-    <path d='M250 200 L268 290' stroke='#a8a8a3' stroke-width='28' stroke-linecap='round' fill='none'/>
-    <circle cx='${accent.x}' cy='${accent.y}' r='14' fill='#0a0a0a' opacity='0.7'/>
-    <circle cx='${accent.x}' cy='${accent.y}' r='24' fill='none' stroke='#0a0a0a' stroke-width='2' opacity='0.4'/>
-    <text x='20' y='380' font-family='monospace' font-size='14' fill='#5a5a55' letter-spacing='2'>${label}</text>
-  </svg>`;
-  return 'data:image/svg+xml;utf8,' + svg.replace(/\n/g,'').replace(/#/g,'%23');
+const SUPABASE_URL = 'https://qidryfffbkhlrdevlfhr.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpZHJ5ZmZmYmtobHJkZXZsZmhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzMTM3MTIsImV4cCI6MjA5NTg4OTcxMn0.L7rUK_d2uywRz-XTuR8likanGI-yXQZCBKsJ5TXetsA';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const PHOTOS_BUCKET = 'patient-photos';
+
+/* Mapeo: PostgreSQL → objeto UI */
+function mapPatientFromDB(p, photos = []){
+  return {
+    id: p.id,
+    fname: p.fname,
+    lname: p.lname,
+    age: p.age,
+    email: p.email,
+    phone: p.phone,
+    diagnosis: p.diagnosis,
+    notes: p.notes,
+    avatar: p.avatar,
+    bono: { active: !!p.bono_active, total: p.bono_total, remaining: p.bono_remaining },
+    createdAt: (p.created_at || '').slice(0,10),
+    photos: photos.filter(ph => ph.patient_id === p.id).map(ph => ({ id: ph.id, url: ph.url, label: ph.label }))
+  };
+}
+function mapPatientToDB(p){
+  return {
+    fname: p.fname, lname: p.lname, age: p.age,
+    email: p.email || null, phone: p.phone,
+    diagnosis: p.diagnosis, notes: p.notes || null,
+    avatar: p.avatar || null,
+    bono_active: !!(p.bono && p.bono.active),
+    bono_total: p.bono && p.bono.active ? p.bono.total : null,
+    bono_remaining: p.bono && p.bono.active ? p.bono.remaining : null
+  };
+}
+function mapApptFromDB(a){
+  return {
+    id: a.id,
+    patientId: a.patient_id,
+    service: a.service,
+    date: a.date,
+    time: (a.time || '').slice(0,5),
+    notes: a.notes || '',
+    status: a.status
+  };
+}
+function mapApptToDB(a){
+  return {
+    patient_id: a.patientId, service: a.service,
+    date: a.date, time: a.time,
+    notes: a.notes || null, status: a.status
+  };
+}
+function mapBlockFromDB(b){
+  return {
+    id: b.id,
+    type: b.type,
+    date: b.date,
+    dateEnd: b.date_end,
+    start: b.start_time ? b.start_time.slice(0,5) : undefined,
+    end: b.end_time ? b.end_time.slice(0,5) : undefined,
+    reason: b.reason
+  };
+}
+function mapBlockToDB(b){
+  return {
+    type: b.type, date: b.date,
+    date_end: b.dateEnd || null,
+    start_time: b.start || null,
+    end_time: b.end || null,
+    reason: b.reason
+  };
 }
 
-const SAMPLE_PHOTOS = {
-  lumbar1: svgPhoto('LUMBAR · 12.04.26', { x:200, y:240 }),
-  lumbar2: svgPhoto('LUMBAR · 26.04.26', { x:200, y:240 }),
-  cervical1: svgPhoto('CERVICAL · 18.04.26', { x:200, y:130 }),
-  hombro1: svgPhoto('HOMBRO IZQ · 02.05.26', { x:150, y:200 }),
-  rodilla1: svgPhoto('RODILLA DCHA · 10.05.26', { x:230, y:300 })
-};
+/* Carga todos los datos del usuario autenticado */
+async function loadAllData(){
+  try {
+    const [patientsRes, photosRes, apptsRes, blocksRes] = await Promise.all([
+      sb.from('patients').select('*').order('created_at', { ascending: false }),
+      sb.from('patient_photos').select('*').order('created_at', { ascending: true }),
+      sb.from('appointments').select('*'),
+      sb.from('blocks').select('*')
+    ]);
+    if (patientsRes.error) throw patientsRes.error;
+    if (apptsRes.error) throw apptsRes.error;
+    if (blocksRes.error) throw blocksRes.error;
+
+    const allPhotos = photosRes.data || [];
+    patients = (patientsRes.data || []).map(p => mapPatientFromDB(p, allPhotos));
+    appointments = (apptsRes.data || []).map(mapApptFromDB);
+    blocks = (blocksRes.data || []).map(mapBlockFromDB);
+  } catch(e){
+    console.error(e);
+    toast('Error cargando datos: ' + (e.message || 'desconocido'));
+    patients = []; appointments = []; blocks = [];
+  }
+}
+
+/* Subir un archivo al bucket de fotos y devolver URL pública */
+async function uploadToStorage(file, folder){
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2,7)}.${ext}`;
+  const { error: upErr } = await sb.storage.from(PHOTOS_BUCKET).upload(path, file, { cacheControl:'3600', upsert:false });
+  if (upErr) throw upErr;
+  const { data: { publicUrl } } = sb.storage.from(PHOTOS_BUCKET).getPublicUrl(path);
+  return publicUrl;
+}
 
 /* ============================================================
-   PATIENTS
+   ESTADO LOCAL (espejo de Supabase, se rellena en loadAllData)
 ============================================================ */
-let patients = [
-  { id:'p1', fname:'Lucía',   lname:'García Pérez',     age:34, email:'lucia.g@email.com',   phone:'+34 612 334 552',
-    diagnosis:'Lumbalgia crónica L4-L5 con irradiación ciática derecha.', notes:'Antecedentes deportivos (running). Trabajo sedentario 8h/día. Mejora progresiva tras 4 sesiones.',
-    photos:[ {url:SAMPLE_PHOTOS.lumbar1, label:'Lumbar · 12.04.26'}, {url:SAMPLE_PHOTOS.lumbar2, label:'Lumbar · 26.04.26'} ],
-    bono:{ active:true, total:10, remaining:5 }, createdAt:'2026-03-15' },
-  { id:'p2', fname:'Carlos',  lname:'Martínez López',   age:41, email:'carlos.m@email.com',  phone:'+34 615 902 113',
-    diagnosis:'Cervicalgia post-accidente de tráfico (latigazo cervical, marzo 2026).', notes:'Limitación rotación cervical. Cefaleas tensionales recurrentes.',
-    photos:[ {url:SAMPLE_PHOTOS.cervical1, label:'Cervical · 18.04.26'} ],
-    bono:{ active:true, total:15, remaining:9 }, createdAt:'2026-03-22' },
-  { id:'p3', fname:'María',   lname:'Sánchez Ruiz',     age:28, email:'maria.sr@email.com',  phone:'+34 699 412 887',
-    diagnosis:'Esguince grado II tobillo derecho. En fase de rehabilitación funcional.', notes:'Practica voleibol amateur. Quiere volver a competir en julio.',
-    photos:[], bono:{ active:false }, createdAt:'2026-04-30' },
-  { id:'p4', fname:'Javier',  lname:'Fernández Gómez',  age:52, email:'javier.fg@email.com', phone:'+34 631 778 220',
-    diagnosis:'Hombro congelado izquierdo (capsulitis adhesiva). Fase de descongelación.', notes:'Diabetes tipo 2 controlada. Mejora muy lenta pero constante.',
-    photos:[ {url:SAMPLE_PHOTOS.hombro1, label:'Hombro · 02.05.26'} ],
-    bono:{ active:true, total:20, remaining:13 }, createdAt:'2026-02-10' },
-  { id:'p5', fname:'Elena',   lname:'Rodríguez Vega',   age:46, email:'elena.rv@email.com',  phone:'+34 654 102 998',
-    diagnosis:'Consulta nutricional · hipertensión arterial y sobrepeso (IMC 28).', notes:'Primera consulta. Plan dietético DASH adaptado a su rutina laboral.',
-    photos:[], bono:{ active:true, total:6, remaining:6 }, createdAt:'2026-05-20' },
-  { id:'p6', fname:'Antonio', lname:'Jiménez Soto',     age:38, email:'antonio.js@email.com',phone:'+34 622 451 309',
-    diagnosis:'Sesiones de mantenimiento osteopático. Sin patología aguda.', notes:'Acude cada 3 semanas. Tensiones musculares por estrés laboral.',
-    photos:[], bono:{ active:false }, createdAt:'2025-11-04' },
-  { id:'p7', fname:'Pilar',   lname:'Moreno Díaz',      age:31, email:'pilar.md@email.com',  phone:'+34 661 887 432',
-    diagnosis:'Tendinitis supraespinoso hombro izquierdo. Probable origen postural.', notes:'Diseñadora gráfica, mucho ratón. Ejercicios pautados para casa.',
-    photos:[], bono:{ active:true, total:8, remaining:3 }, createdAt:'2026-04-02' },
-  { id:'p8', fname:'Roberto', lname:'Álvarez Castro',   age:58, email:'roberto.ac@email.com',phone:'+34 678 339 110',
-    diagnosis:'Rehabilitación postquirúrgica meniscectomía rodilla derecha (abril 2026).', notes:'Buena evolución. Recuperando fuerza cuádriceps progresivamente.',
-    photos:[ {url:SAMPLE_PHOTOS.rodilla1, label:'Rodilla · 10.05.26'} ],
-    bono:{ active:true, total:12, remaining:6 }, createdAt:'2026-04-15' },
-  { id:'p9', fname:'Carmen',  lname:'Navarro Ibáñez',   age:67, email:'carmen.ni@email.com', phone:'+34 644 220 765',
-    diagnosis:'Artrosis cervical y dorsal. Sesiones de descarga y movilización.', notes:'Cuida de su madre, alta carga emocional. Atender también ergonomía doméstica.',
-    photos:[], bono:{ active:false }, createdAt:'2025-12-18' },
-  { id:'p10',fname:'Diego',   lname:'Romero Hernández', age:35, email:'diego.rh@email.com',  phone:'+34 605 119 882',
-    diagnosis:'Mantenimiento osteopático mensual. Sin patología activa.', notes:'Maratoniano. Acude antes de cada carrera larga.',
-    photos:[], bono:{ active:false }, createdAt:'2025-09-12' },
-  { id:'p11',fname:'Isabel',  lname:'Torres Molina',    age:43, email:'isabel.tm@email.com', phone:'+34 692 778 540',
-    diagnosis:'Seguimiento nutricional mensual · plan vegetariano equilibrado.', notes:'Excelente adherencia. Bajada 4kg en 3 meses.',
-    photos:[], bono:{ active:true, total:12, remaining:7 }, createdAt:'2026-02-28' },
-  { id:'p12',fname:'Pablo',   lname:'Ortega Reyes',     age:29, email:'pablo.or@email.com',  phone:'+34 635 443 219',
-    diagnosis:'Lumbalgia mecánica aguda. Primera visita pendiente de valoración completa.', notes:'',
-    photos:[], bono:{ active:false }, createdAt:'2026-05-25' },
-  { id:'p13',fname:'Sofía',   lname:'Vargas Cortés',    age:24, email:'sofia.vc@email.com',  phone:'+34 671 996 348',
-    diagnosis:'Fractura distal radio muñeca izquierda. Inmovilización retirada hace 2 sem.', notes:'Recuperación de movilidad y fuerza. Pendiente reincorporación al trabajo.',
-    photos:[], bono:{ active:true, total:10, remaining:9 }, createdAt:'2026-05-18' },
-  { id:'p14',fname:'Andrés',  lname:'Cabrera Peña',     age:39, email:'andres.cp@email.com', phone:'+34 618 553 077',
-    diagnosis:'Tratamiento osteopático estructural. Bloqueos D7-D8.', notes:'',
-    photos:[], bono:{ active:false }, createdAt:'2026-04-22' },
-  { id:'p15',fname:'Ana',     lname:'Lozano Cano',      age:33, email:'ana.lc@email.com',    phone:'+34 627 102 449',
-    diagnosis:'Contractura trapecios bilateral. Patrón postural anterior.', notes:'Embarazo de 22 semanas, ajustar técnicas y posiciones.',
-    photos:[], bono:{ active:true, total:8, remaining:7 }, createdAt:'2026-05-02' }
-];
-
-/* ============================================================
-   APPOINTMENTS (referencing patient IDs)
-============================================================ */
-let appointments = [
-  { id:'a1',  patientId:'p1',  service:'fisio',  date:'2026-05-27', time:'09:00', notes:'Trabajar zona lumbar baja.', status:'confirmed' },
-  { id:'a2',  patientId:'p2',  service:'osteo',  date:'2026-05-27', time:'10:30', notes:'', status:'confirmed' },
-  { id:'a3',  patientId:'p3',  service:'trauma', date:'2026-05-27', time:'12:00', notes:'Test estabilidad tobillo.', status:'pending' },
-  { id:'a4',  patientId:'p4',  service:'fisio',  date:'2026-05-27', time:'17:30', notes:'', status:'confirmed' },
-  { id:'a5',  patientId:'p5',  service:'nutri',  date:'2026-05-28', time:'10:00', notes:'Revisar diario alimentario.', status:'confirmed' },
-  { id:'a6',  patientId:'p6',  service:'osteo',  date:'2026-05-28', time:'11:30', notes:'', status:'confirmed' },
-  { id:'a7',  patientId:'p7',  service:'fisio',  date:'2026-05-28', time:'18:00', notes:'', status:'pending' },
-  { id:'a8',  patientId:'p8',  service:'trauma', date:'2026-05-29', time:'09:30', notes:'Progresión ejercicios cuádriceps.', status:'confirmed' },
-  { id:'a9',  patientId:'p9',  service:'fisio',  date:'2026-05-29', time:'11:00', notes:'', status:'cancelled' },
-  { id:'a10', patientId:'p10', service:'osteo',  date:'2026-05-29', time:'16:30', notes:'Pre-maratón.', status:'confirmed' },
-  { id:'a11', patientId:'p11', service:'nutri',  date:'2026-06-01', time:'12:30', notes:'Pesaje mensual.', status:'confirmed' },
-  { id:'a12', patientId:'p12', service:'fisio',  date:'2026-06-01', time:'17:00', notes:'Primera visita.', status:'pending' },
-  { id:'a13', patientId:'p13', service:'trauma', date:'2026-06-02', time:'10:00', notes:'Movilizaciones muñeca.', status:'confirmed' },
-  { id:'a14', patientId:'p14', service:'osteo',  date:'2026-06-02', time:'18:30', notes:'', status:'confirmed' },
-  { id:'a15', patientId:'p15', service:'fisio',  date:'2026-06-03', time:'09:00', notes:'Trapecios — adaptado a embarazo.', status:'confirmed' },
-  // Past appointments for history
-  { id:'a16', patientId:'p1',  service:'fisio',  date:'2026-05-20', time:'09:00', notes:'Sesión 4.', status:'confirmed' },
-  { id:'a17', patientId:'p1',  service:'fisio',  date:'2026-05-13', time:'09:00', notes:'Sesión 3.', status:'confirmed' },
-  { id:'a18', patientId:'p4',  service:'fisio',  date:'2026-05-20', time:'17:30', notes:'', status:'confirmed' }
-];
-
-/* ============================================================
-   BLOCKED PERIODS
-============================================================ */
-let blocks = [
-  { id:'b1', type:'day',   date:'2026-06-09', reason:'Festivo local' },
-  { id:'b2', type:'range', date:'2026-08-10', dateEnd:'2026-08-23', reason:'Vacaciones de verano' },
-  { id:'b3', type:'time',  date:'2026-06-04', start:'09:00', end:'12:00', reason:'Curso de actualización' }
-];
+let patients = [];
+let appointments = [];
+let blocks = [];
 
 /* ============================================================
    FILTER STATE
@@ -2229,11 +2231,17 @@ function renderBlocks(){
     </div>`;
   }).join('');
 
-  $$('[data-del-block]').forEach(btn => btn.addEventListener('click', () => {
-    blocks = blocks.filter(b => b.id !== btn.dataset.delBlock);
-    renderBlocks();
-    if ($('#view-calendario').classList.contains('on')) renderBigCalendar();
-    toast('Bloqueo eliminado');
+  $$('[data-del-block]').forEach(btn => btn.addEventListener('click', async () => {
+    try {
+      const { error } = await sb.from('blocks').delete().eq('id', btn.dataset.delBlock);
+      if (error) throw error;
+      blocks = blocks.filter(b => b.id !== btn.dataset.delBlock);
+      renderBlocks();
+      if ($('#view-calendario').classList.contains('on')) renderBigCalendar();
+      toast('Bloqueo eliminado');
+    } catch(err){
+      toast('Error al eliminar: ' + (err.message || 'desconocido'));
+    }
   }));
 }
 
@@ -2434,26 +2442,26 @@ function openPatientDetail(pid){
   window.scrollTo({ top:0, behavior:'smooth' });
 }
 
-/* photo upload */
-function handlePhotoUpload(e, pid){
+/* photo upload — sube a Supabase Storage y guarda fila en patient_photos */
+async function handlePhotoUpload(e, pid){
   const files = Array.from(e.target.files);
   if (!files.length) return;
   const p = getPatient(pid);
-  let processed = 0;
-  files.forEach(file => {
-    const reader = new FileReader();
-    reader.onload = (ev) => {
+  toast(`Subiendo ${files.length} foto${files.length===1?'':'s'}…`);
+  try {
+    for (const file of files){
       const today = new Date();
       const label = `${String(today.getDate()).padStart(2,'0')}.${String(today.getMonth()+1).padStart(2,'0')}.${String(today.getFullYear()).slice(-2)}`;
-      p.photos.push({ url: ev.target.result, label });
-      processed++;
-      if (processed === files.length){
-        toast(`${files.length} foto${files.length===1?'':'s'} añadida${files.length===1?'':'s'}`);
-        openPatientDetail(pid);
-      }
-    };
-    reader.readAsDataURL(file);
-  });
+      const url = await uploadToStorage(file, `progress/${pid}`);
+      const { data: row, error } = await sb.from('patient_photos').insert({ patient_id: pid, url, label }).select().single();
+      if (error) throw error;
+      p.photos.push({ id: row.id, url: row.url, label: row.label });
+    }
+    toast(`${files.length} foto${files.length===1?'':'s'} añadida${files.length===1?'':'s'}`);
+    openPatientDetail(pid);
+  } catch(err){
+    toast('Error al subir fotos: ' + (err.message || 'desconocido'));
+  }
 }
 
 /* lightbox */
@@ -2469,13 +2477,23 @@ function openLightbox(pid, idx){
 }
 $('#lb-close').addEventListener('click', () => $('#lightbox').classList.remove('on'));
 $('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') $('#lightbox').classList.remove('on'); });
-$('#lb-del').addEventListener('click', () => {
+$('#lb-del').addEventListener('click', async () => {
   if (lbContext.pid === null) return;
   const p = getPatient(lbContext.pid);
-  p.photos.splice(lbContext.idx, 1);
-  $('#lightbox').classList.remove('on');
-  toast('Foto eliminada');
-  openPatientDetail(lbContext.pid);
+  const photo = p.photos[lbContext.idx];
+  if (!photo) return;
+  try {
+    if (photo.id){
+      const { error } = await sb.from('patient_photos').delete().eq('id', photo.id);
+      if (error) throw error;
+    }
+    p.photos.splice(lbContext.idx, 1);
+    $('#lightbox').classList.remove('on');
+    toast('Foto eliminada');
+    openPatientDetail(lbContext.pid);
+  } catch(err){
+    toast('Error al eliminar foto: ' + (err.message || 'desconocido'));
+  }
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#lightbox').classList.contains('on')) $('#lightbox').classList.remove('on'); });
 
@@ -2526,7 +2544,7 @@ function setFormStatus(st){
 }
 $$('#form-status .status-pill').forEach(p => p.addEventListener('click', () => setFormStatus(p.dataset.st)));
 
-$('#appt-form').addEventListener('submit', (e) => {
+$('#appt-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const data = {
     patientId: $('#f-patient').value,
@@ -2537,26 +2555,40 @@ $('#appt-form').addEventListener('submit', (e) => {
     status: formStatus
   };
   if (!data.patientId || !data.service || !data.date || !data.time){ toast('Faltan campos obligatorios'); return; }
-  if (editingApptId){
-    const idx = appointments.findIndex(a => a.id === editingApptId);
-    appointments[idx] = { ...appointments[idx], ...data };
-    toast('Cita actualizada');
-  } else {
-    appointments.push({ id:'a'+Date.now(), ...data });
-    toast('Nueva cita creada');
+  try {
+    if (editingApptId){
+      const { data: row, error } = await sb.from('appointments').update(mapApptToDB(data)).eq('id', editingApptId).select().single();
+      if (error) throw error;
+      const idx = appointments.findIndex(a => a.id === editingApptId);
+      appointments[idx] = mapApptFromDB(row);
+      toast('Cita actualizada');
+    } else {
+      const { data: row, error } = await sb.from('appointments').insert(mapApptToDB(data)).select().single();
+      if (error) throw error;
+      appointments.push(mapApptFromDB(row));
+      toast('Nueva cita creada');
+    }
+    closeDrawer('appt');
+    refreshAll();
+  } catch(err){
+    toast('Error al guardar: ' + (err.message || 'desconocido'));
   }
-  closeDrawer('appt');
-  refreshAll();
 });
 
 $('#btn-delete-appt').addEventListener('click', () => $('#confirm-delete-appt').classList.add('on'));
 $('#confirm-cancel-appt').addEventListener('click', () => $('#confirm-delete-appt').classList.remove('on'));
-$('#confirm-yes-appt').addEventListener('click', () => {
+$('#confirm-yes-appt').addEventListener('click', async () => {
   if (!editingApptId) return;
-  appointments = appointments.filter(a => a.id !== editingApptId);
-  closeDrawer('appt');
-  toast('Cita eliminada');
-  refreshAll();
+  try {
+    const { error } = await sb.from('appointments').delete().eq('id', editingApptId);
+    if (error) throw error;
+    appointments = appointments.filter(a => a.id !== editingApptId);
+    closeDrawer('appt');
+    toast('Cita eliminada');
+    refreshAll();
+  } catch(err){
+    toast('Error al eliminar: ' + (err.message || 'desconocido'));
+  }
 });
 
 /* ============================================================
@@ -2564,7 +2596,8 @@ $('#confirm-yes-appt').addEventListener('click', () => {
 ============================================================ */
 let editingPatientId = null;
 let bonoOn = false;
-let currentAvatar = null;
+let currentAvatar = null;   // URL en storage (string) o data URL temporal
+let currentAvatarFile = null; // File pendiente de subir si hay nuevo
 
 function setBono(on){
   bonoOn = on;
@@ -2586,12 +2619,14 @@ function updateAvatarPreview(){
 $('#avatar-input').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  currentAvatarFile = file;
   const reader = new FileReader();
   reader.onload = (ev) => { currentAvatar = ev.target.result; updateAvatarPreview(); };
   reader.readAsDataURL(file);
 });
 $('#avatar-remove').addEventListener('click', () => {
   currentAvatar = null;
+  currentAvatarFile = null;
   $('#avatar-input').value = '';
   updateAvatarPreview();
 });
@@ -2606,6 +2641,7 @@ function openPatientDrawer(id=null){
   $('#btn-delete-patient').style.display = isEdit ? 'inline-flex' : 'none';
   $('#confirm-delete-patient').classList.remove('on');
 
+  currentAvatarFile = null;
   if (isEdit){
     const p = getPatient(id);
     $('#pf-fname').value = p.fname;
@@ -2635,7 +2671,7 @@ function openPatientDrawer(id=null){
   setTimeout(() => $('#pf-fname').focus(), 250);
 }
 
-$('#patient-form').addEventListener('submit', (e) => {
+$('#patient-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const data = {
     fname: $('#pf-fname').value.trim(),
@@ -2650,31 +2686,53 @@ $('#patient-form').addEventListener('submit', (e) => {
   };
   if (!data.fname || !data.lname || !data.age || !data.phone || !data.diagnosis){ toast('Faltan campos obligatorios'); return; }
 
-  if (editingPatientId){
-    const idx = patients.findIndex(p => p.id === editingPatientId);
-    patients[idx] = { ...patients[idx], ...data };
-    toast('Ficha actualizada');
-    closeDrawer('patient');
-    openPatientDetail(editingPatientId);
-  } else {
-    const np = { id:'p'+Date.now(), ...data, photos:[], createdAt:isoFromDate(TODAY) };
-    patients.push(np);
-    toast('Nueva ficha creada');
-    closeDrawer('patient');
-    renderPatientsGrid();
+  try {
+    // Si hay una foto de perfil nueva, subirla primero a Supabase Storage
+    if (currentAvatarFile){
+      toast('Subiendo foto de perfil…');
+      data.avatar = await uploadToStorage(currentAvatarFile, 'avatars');
+      currentAvatarFile = null;
+    }
+
+    if (editingPatientId){
+      const { data: row, error } = await sb.from('patients').update(mapPatientToDB(data)).eq('id', editingPatientId).select().single();
+      if (error) throw error;
+      const idx = patients.findIndex(p => p.id === editingPatientId);
+      patients[idx] = { ...patients[idx], ...mapPatientFromDB(row), photos: patients[idx].photos };
+      toast('Ficha actualizada');
+      closeDrawer('patient');
+      openPatientDetail(editingPatientId);
+    } else {
+      const { data: row, error } = await sb.from('patients').insert(mapPatientToDB(data)).select().single();
+      if (error) throw error;
+      patients.push(mapPatientFromDB(row));
+      toast('Nueva ficha creada');
+      closeDrawer('patient');
+      renderPatientsGrid();
+    }
+    refreshAll();
+  } catch(err){
+    toast('Error al guardar: ' + (err.message || 'desconocido'));
   }
-  refreshAll();
 });
 
 $('#btn-delete-patient').addEventListener('click', () => $('#confirm-delete-patient').classList.add('on'));
 $('#confirm-cancel-patient').addEventListener('click', () => $('#confirm-delete-patient').classList.remove('on'));
-$('#confirm-yes-patient').addEventListener('click', () => {
+$('#confirm-yes-patient').addEventListener('click', async () => {
   if (!editingPatientId) return;
-  patients = patients.filter(p => p.id !== editingPatientId);
-  editingPatientId = null;
-  closeDrawer('patient');
-  toast('Ficha eliminada');
-  renderPatientsGrid();
+  try {
+    const { error } = await sb.from('patients').delete().eq('id', editingPatientId);
+    if (error) throw error;
+    patients = patients.filter(p => p.id !== editingPatientId);
+    appointments = appointments.filter(a => a.patientId !== editingPatientId);
+    editingPatientId = null;
+    closeDrawer('patient');
+    toast('Ficha eliminada');
+    renderPatientsGrid();
+    refreshAll();
+  } catch(err){
+    toast('Error al eliminar: ' + (err.message || 'desconocido'));
+  }
 });
 
 /* ============================================================
@@ -2698,10 +2756,9 @@ function openBlockDrawer(presetDate=null){
   openDrawer('block');
 }
 
-$('#block-form').addEventListener('submit', (e) => {
+$('#block-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const data = {
-    id:'b'+Date.now(),
     type:blockType,
     date:$('#bf-date').value,
     reason:$('#bf-reason').value.trim()
@@ -2716,11 +2773,17 @@ $('#block-form').addEventListener('submit', (e) => {
     data.end = $('#bf-end').value;
     if (!data.start || !data.end){ toast('Faltan las horas'); return; }
   }
-  blocks.push(data);
-  closeDrawer('block');
-  toast('Bloqueo añadido');
-  renderBlocks();
-  renderBigCalendar();
+  try {
+    const { data: row, error } = await sb.from('blocks').insert(mapBlockToDB(data)).select().single();
+    if (error) throw error;
+    blocks.push(mapBlockFromDB(row));
+    closeDrawer('block');
+    toast('Bloqueo añadido');
+    renderBlocks();
+    renderBigCalendar();
+  } catch(err){
+    toast('Error al guardar bloqueo: ' + (err.message || 'desconocido'));
+  }
 });
 
 /* ============================================================
@@ -2794,35 +2857,33 @@ function refreshAll(){
 }
 
 /* ============================================================
-   AUTH (login / logout)
+   AUTH — Supabase Auth real
 ============================================================ */
-const AUTH_KEY = 'nstd_admin_session';
-const DEMO_EMAIL = 'isa@nstd.es';
-const DEMO_PASSWORD = 'nstd2026';
-
-function isAuthed(){
-  return localStorage.getItem(AUTH_KEY) === 'active' || sessionStorage.getItem(AUTH_KEY) === 'active';
+async function isAuthed(){
+  const { data: { session } } = await sb.auth.getSession();
+  return !!session;
 }
 function showAdmin(){ document.body.classList.remove('not-authed'); }
 function showLogin(){ document.body.classList.add('not-authed'); setTimeout(() => $('#login-email').focus(), 100); }
 
-function doLogin(email, password, remember){
-  if (email.trim().toLowerCase() === DEMO_EMAIL && password === DEMO_PASSWORD){
-    (remember ? localStorage : sessionStorage).setItem(AUTH_KEY, 'active');
-    showAdmin();
-    toast('Bienvenida, Isa');
-    return true;
-  }
-  return false;
+async function doLogin(email, password){
+  const { data, error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+  if (error) return false;
+  if (data?.user?.email) $('#user-email').textContent = data.user.email;
+  await loadAllData();
+  refreshAll();
+  showAdmin();
+  toast('Bienvenida');
+  return true;
 }
-function doLogout(){
-  localStorage.removeItem(AUTH_KEY);
-  sessionStorage.removeItem(AUTH_KEY);
-  // reset transient state
+async function doLogout(){
+  await sb.auth.signOut();
+  patients = []; appointments = []; blocks = [];
   selectedDay = null;
   $('#patient-detail').style.display = 'none';
   $('#patients-list-wrap').style.display = 'block';
   switchView('citas');
+  refreshAll();
   showLogin();
 }
 
@@ -2836,13 +2897,16 @@ $('#pw-toggle').addEventListener('click', () => {
   $('#pw-toggle').setAttribute('aria-label', isHidden ? 'Ocultar contraseña' : 'Mostrar contraseña');
 });
 
-$('#login-form').addEventListener('submit', (e) => {
+$('#login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const email = $('#login-email').value;
   const password = $('#login-password').value;
-  const remember = $('#login-remember').checked;
   const errorEl = $('#auth-error');
-  if (doLogin(email, password, remember)){
+  const submitBtn = $('.auth-submit');
+  submitBtn.disabled = true;
+  const ok = await doLogin(email, password);
+  submitBtn.disabled = false;
+  if (ok){
     errorEl.classList.remove('on');
     $('#login-password').value = '';
   } else {
@@ -2869,13 +2933,21 @@ $('#btn-logout').addEventListener('click', doLogout);
 /* ============================================================
    INIT
 ============================================================ */
-renderStats();
-renderCounts();
-renderList();
-populatePatientSelect();
+bigViewYear = TODAY.getFullYear();
+bigViewMonth = TODAY.getMonth();
 
-if (isAuthed()) showAdmin();
-else showLogin();
+(async () => {
+  const { data: { session } } = await sb.auth.getSession();
+  if (session){
+    if (session.user?.email) $('#user-email').textContent = session.user.email;
+    await loadAllData();
+    showAdmin();
+  } else {
+    showLogin();
+  }
+  refreshAll();
+  populatePatientSelect();
+})();
 </script>
 
 </body>
